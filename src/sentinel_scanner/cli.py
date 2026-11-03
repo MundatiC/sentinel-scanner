@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -11,6 +12,9 @@ from rich.console import Console
 from sentinel_scanner import __version__
 from sentinel_scanner.checks import REGISTRY
 from sentinel_scanner.config import load_settings
+from sentinel_scanner.deps.osv import OsvClient, OsvError
+from sentinel_scanner.deps.parsers import DepsError
+from sentinel_scanner.deps.scan import scan_dependencies
 from sentinel_scanner.http import PoliteClient, TargetError, validate_target
 from sentinel_scanner.models import Severity
 from sentinel_scanner.output import render_json, render_table
@@ -133,4 +137,46 @@ def web(
     if outcome.nothing_ran:
         raise typer.Exit(code=EXIT_UNREACHABLE)
     if any(f.severity.rank >= fail_on.rank for f in outcome.result.findings):
+        raise typer.Exit(code=EXIT_FINDINGS)
+
+
+@app.command()
+def deps(
+    path: Annotated[
+        Path,
+        typer.Argument(
+            help="A lockfile (requirements.txt, package-lock.json, poetry.lock) or a project folder."
+        ),
+    ],
+    output_format: Annotated[
+        OutputFormat, typer.Option("--format", help="Output format.")
+    ] = OutputFormat.table,
+    fail_on: Annotated[
+        Severity, typer.Option(help="Exit with code 1 if any finding is at least this severe.")
+    ] = Severity.HIGH,
+) -> None:
+    """Check your project's dependencies for known vulnerabilities using the OSV database.
+
+    Only local files are read. Package names and versions (nothing else) are sent to api.osv.dev.
+    Exit codes: 0 ok, 1 findings at/above --fail-on, 2 bad usage, 3 OSV unreachable.
+    """
+    settings = load_settings()
+    osv = OsvClient(timeout=settings.timeout)
+    try:
+        result, notes = scan_dependencies(path, osv)
+    except DepsError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=EXIT_REFUSED) from exc
+    except OsvError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=EXIT_UNREACHABLE) from exc
+    finally:
+        osv.close()
+
+    if output_format is OutputFormat.json:
+        typer.echo(render_json(result, errors={}, notes=notes))
+    else:
+        render_table(result, console, notes=notes)
+
+    if any(f.severity.rank >= fail_on.rank for f in result.findings):
         raise typer.Exit(code=EXIT_FINDINGS)

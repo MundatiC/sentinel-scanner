@@ -3,7 +3,7 @@
 Defensive security scanner and log analyzer for the **Sentinel** platform
 ([sentinel-api](https://github.com/MundatiC/sentinel-api) · [sentinel-dashboard](https://github.com/MundatiC/sentinel-dashboard)).
 
-> Status: **step 2 of 5** (web checks). Dependency scanning, log analysis and post-mortems arrive in the next steps. Plan: [docs/PLAN.md](docs/PLAN.md).
+> Status: **step 3 of 5** (web checks + dependency scanning). Log analysis, API ingestion and post-mortems arrive in the next steps. Plan: [docs/PLAN.md](docs/PLAN.md).
 
 ## Responsible use
 
@@ -45,6 +45,23 @@ Exit codes: `0` ok, `1` findings at or above `--fail-on` (default `HIGH`, handy 
 - **No secrets copied:** the exposed-files check reads at most 1 KB and keeps only status, size and a SHA-256 fingerprint, never content. Cookie values are discarded at parse time.
 - **A hit needs a signature,** not just `200 OK`, so sites that answer 200 for every path do not produce false positives.
 - **Output is data, not markup:** text that came from the target cannot inject terminal formatting.
+
+## `sentinel-scan deps`
+
+```bash
+sentinel-scan deps ./my-project                 # finds requirements.txt, package-lock.json, poetry.lock
+sentinel-scan deps ./package-lock.json --format json --fail-on CRITICAL
+```
+
+Reads exact versions from the lockfile, asks the [OSV](https://osv.dev) database (`/v1/querybatch`, then one lookup per
+unique vulnerability), and reports each vulnerable package with severity and the fixed version when one exists.
+
+- **Privacy:** only package *names and versions* are sent to `api.osv.dev`; no code, paths or project names.
+- **Only exact pins can be checked.** `requests>=2` does not say which version is installed, so unpinned lines are
+  listed as *skipped* instead of silently ignored. Use a lockfile for full coverage.
+- **Severity** comes from the advisory's own rating when present, otherwise it is computed from the CVSS v3 vector;
+  if neither exists it is `MEDIUM` and marked `severityUnknown`.
+- Vulnerability ids returned by the network are validated before being used in a URL.
 
 ## Architecture
 

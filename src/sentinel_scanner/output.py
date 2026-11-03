@@ -20,7 +20,10 @@ COLORS = {
 
 
 def render_table(
-    result: ScanResult, console: Console, errors: dict[str, str] | None = None
+    result: ScanResult,
+    console: Console,
+    errors: dict[str, str] | None = None,
+    notes: list[str] | None = None,
 ) -> None:
     """Pretty table for humans. Everything is wrapped in Text() so that text which came from the
     target (header values etc.) can never be interpreted as terminal markup."""
@@ -45,10 +48,19 @@ def render_table(
     counts = result.counts()
     summary = "  ".join(f"{name}: {count}" for name, count in counts.items() if count)
     console.print(f"Summary: {summary or 'nothing to report'}")
+    for note in notes or []:
+        console.print(Text(f"- {note}", style="dim"))
     for check, message in (errors or {}).items():
         console.print(Text(f"! check '{check}' could not run: {message}", style="yellow"))
 
 
-def render_json(result: ScanResult, errors: dict[str, str] | None = None) -> str:
-    payload = {**result.to_api(), "counts": result.counts(), "errors": errors or {}}
+def render_json(
+    result: ScanResult, errors: dict[str, str] | None = None, notes: list[str] | None = None
+) -> str:
+    payload = {
+        **result.to_api(),
+        "counts": result.counts(),
+        "errors": errors or {},
+        "notes": notes or [],
+    }
     return json.dumps(payload, indent=2)
