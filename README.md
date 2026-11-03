@@ -3,7 +3,7 @@
 Defensive security scanner and log analyzer for the **Sentinel** platform
 ([sentinel-api](https://github.com/MundatiC/sentinel-api) · [sentinel-dashboard](https://github.com/MundatiC/sentinel-dashboard)).
 
-> Status: **step 3 of 5** (web checks + dependency scanning). Log analysis, API ingestion and post-mortems arrive in the next steps. Plan: [docs/PLAN.md](docs/PLAN.md).
+> Status: **step 4 of 5** (web checks, dependency scanning, log analysis, API ingestion). The post-mortem generator arrives in the last step. Plan: [docs/PLAN.md](docs/PLAN.md).
 
 ## Responsible use
 
@@ -62,6 +62,43 @@ unique vulnerability), and reports each vulnerable package with severity and the
 - **Severity** comes from the advisory's own rating when present, otherwise it is computed from the CVSS v3 vector;
   if neither exists it is `MEDIUM` and marked `severityUnknown`.
 - Vulnerability ids returned by the network are validated before being used in a URL.
+
+## `sentinel-scan logs`
+
+```bash
+sentinel-scan logs /var/log/nginx/access.log --type nginx
+sentinel-scan logs /var/log/auth.log --type auth --year 2026 --threshold 5 --window 60
+sentinel-scan logs access.log --type nginx --send --source web-1     # let Sentinel raise the alerts
+```
+
+| Detector      | Logic                                                                                              |
+| ------------- | -------------------------------------------------------------------------------------------------- |
+| Brute force   | at least `--threshold` failed logins from one IP within any `--window` seconds (sshd `Failed password`, or web `401`). Same rule as the API's default, so you can compare. |
+| Injection     | SQL injection, XSS, path traversal and command-chaining patterns in the URL-decoded (twice) request target |
+
+- **Detection only.** Patterns are matched against log text; nothing is replayed, sent to the site, or executed.
+  They are heuristics for spotting probes, not a filter: obfuscated payloads can slip through.
+- Logs are untrusted: unparsable lines are counted and skipped, long lines are cut, IPs are validated, and attacker-controlled text is shown as plain text.
+- Syslog timestamps have no year or timezone: `--year` sets the year (December lines read in January are handled) and
+  zone-less times are treated as UTC.
+- Exit codes: `0` nothing found, `1` detections, `4` events could not be sent.
+
+## Sending results to sentinel-api (`--send`)
+
+`web`, `deps` and `logs` accept `--send`. Configure with environment variables (never CLI flags: those end up in shell history and `ps`):
+
+```bash
+export SENTINEL_API_URL=http://localhost:4000
+export SENTINEL_API_KEY=snt_...        # create it in sentinel-api: POST /api-keys (scopes: events:write, scans:write, incidents:read)
+```
+
+- `web`/`deps` send one scan (critical findings also become events); `logs` sends only the **detected** events
+  (including the request path of injection attempts, so avoid it on logs whose URLs contain secrets).
+- `--send` is validated **before** any work starts, results are printed **before** they are uploaded, and `--format json`
+  keeps stdout pure JSON (status messages go to stderr).
+- The API URL must be `https://`, except for localhost, private networks and single-label names like the compose service `api`,
+  so the API key is never sent in clear text across the internet.
+- Exit code `4` means the upload failed (the results were still printed).
 
 ## Architecture
 
