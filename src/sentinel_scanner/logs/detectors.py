@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Literal
@@ -34,6 +34,15 @@ def _is_failed_login(record: LogRecord) -> bool:
     return record.kind is Kind.AUTH_FAILURE or (
         record.kind is Kind.REQUEST and record.status == 401
     )
+
+
+def keep_relevant(records: Iterable[LogRecord]) -> Iterator[LogRecord]:
+    """Pass through only the records a detector can use: failed logins and requests that match an attack
+    signature. Everything else (the vast majority of a real access log) is dropped as it streams by, so
+    memory stays flat however big the file is. Detectors give the same answer with or without this filter."""
+    for record in records:
+        if _is_failed_login(record) or record.kind is Kind.REQUEST and record.target and match_signatures(record.target):
+            yield record
 
 
 class BruteForceDetector:

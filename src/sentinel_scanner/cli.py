@@ -19,7 +19,12 @@ from sentinel_scanner.deps.osv import OsvClient, OsvError
 from sentinel_scanner.deps.parsers import DepsError
 from sentinel_scanner.deps.scan import scan_dependencies
 from sentinel_scanner.http import PoliteClient, TargetError, validate_target
-from sentinel_scanner.logs.detectors import BruteForceDetector, Detection, InjectionDetector
+from sentinel_scanner.logs.detectors import (
+    BruteForceDetector,
+    Detection,
+    InjectionDetector,
+    keep_relevant,
+)
 from sentinel_scanner.logs.events import default_source, detections_to_events
 from sentinel_scanner.logs.parsers import LogType, ParseStats, read_records
 from sentinel_scanner.models import ScanResult, Severity, iso
@@ -320,7 +325,8 @@ def logs(
     api = _api_client_or_exit(settings) if send else None
 
     stats = ParseStats()
-    records = list(read_records(file, log_type, stats, year=year))
+    # Stream the file and keep only what a detector can use: memory must not grow with the size of the log.
+    records = list(keep_relevant(read_records(file, log_type, stats, year=year)))
     detections = BruteForceDetector(threshold, window).detect(records)
     if log_type is not LogType.auth:
         detections += InjectionDetector().detect(records)

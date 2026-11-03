@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from sentinel_scanner.checks.base import ScanContext, short
 from sentinel_scanner.models import Category, Finding, Severity
@@ -17,7 +17,6 @@ class ParsedCookie:
     secure: bool = False
     httponly: bool = False
     samesite: str | None = None
-    attributes: dict[str, str] = field(default_factory=dict)
 
     @property
     def looks_sensitive(self) -> bool:

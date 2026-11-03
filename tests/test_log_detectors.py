@@ -171,3 +171,30 @@ class TestInjectionDetector:
     def test_sample_is_truncated(self) -> None:
         long = "/p?id=1' UNION SELECT " + "A" * 5000
         assert len(InjectionDetector().detect([request(long)])[0].sample or "") == 200
+
+
+class TestKeepRelevant:
+    def test_drops_ordinary_traffic_and_keeps_only_what_detectors_use(self) -> None:
+        from sentinel_scanner.logs.detectors import keep_relevant
+
+        boring = [request(f"/products/{i}", seconds=i) for i in range(1000)]
+        wanted = [request("/p?id=1' UNION SELECT 1"), request("/login", status=401), failure(0)]
+        kept = list(keep_relevant([*boring, *wanted]))
+        assert kept == wanted  # a thousand harmless requests leave nothing behind
+
+    def test_detections_are_identical_with_and_without_the_filter(self) -> None:
+        from sentinel_scanner.logs.detectors import keep_relevant
+
+        records = [
+            *[failure(s) for s in (0, 5, 10, 15, 20)],
+            request("/p?id=1' OR 1=1--", seconds=3),
+            request("/s?q=<script>x</script>", seconds=4),
+            *[request(f"/page/{i}", seconds=i) for i in range(200)],
+            LogRecord(time=T0, ip="203.0.113.5", kind=Kind.AUTH_SUCCESS, line=1, user="alice"),
+        ]
+
+        def summary(rs: list[LogRecord]):  # type: ignore[no-untyped-def]
+            found = BruteForceDetector(5, 60).detect(rs) + InjectionDetector().detect(rs)
+            return sorted((d.kind, d.ip, d.category, d.count) for d in found)
+
+        assert summary(list(keep_relevant(records))) == summary(records)
