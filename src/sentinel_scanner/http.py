@@ -63,6 +63,7 @@ class PoliteClient:
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._delay = delay
+        self.timeout = timeout
         self._last_request = 0.0
         self._client = httpx.Client(
             headers={"User-Agent": USER_AGENT},
