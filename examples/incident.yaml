@@ -1,0 +1,56 @@
+# Example input for:  sentinel-scan postmortem --timeline examples/incident.yaml --out report.md --pdf
+title: Brute-force attack against the login endpoint
+severity: HIGH
+status: RESOLVED
+owner: Caleb
+started_at: 2026-03-02T09:58:00Z     # when the attack really began
+detected_at: 2026-03-02T10:03:30Z    # when Sentinel alerted
+resolved_at: 2026-03-02T11:20:00Z
+
+summary: >
+  An automated client tried thousands of passwords against /login from a single IP address for about
+  20 minutes. No account was compromised. The attacking IP was blocked at the firewall.
+impact: >
+  Login latency rose from 120 ms to 900 ms for roughly 15 minutes. No data was accessed and no
+  accounts were taken over.
+detection: >
+  Sentinel's "Brute-force login attempts" rule (5 failed logins from one IP in 60 seconds) raised a HIGH
+  alert 5 minutes after the attack started. The alert was seen on the live dashboard feed.
+root_cause: >
+  The login endpoint had no per-account lockout and the global rate limit was set too high (300 requests
+  per 15 minutes per IP) to slow a password-guessing tool.
+response: >
+  The IP was blocked at the firewall, the login rate limit was lowered, and the affected accounts were
+  checked for successful logins from the attacker's address (none found).
+
+timeline:
+  - time: 2026-03-02T09:58:00Z
+    kind: START
+    description: First failed login from 203.0.113.42 (seen later in the logs).
+  - time: 2026-03-02T10:03:30Z
+    kind: DETECTION
+    description: Sentinel raised "Brute-force login attempts" (HIGH) for 203.0.113.42.
+  - time: 2026-03-02T10:06:00Z
+    kind: ACTION
+    description: Alert acknowledged; incident opened.
+    author: caleb@example.com
+  - time: 2026-03-02T10:15:00Z
+    kind: ACTION
+    description: Attacking IP blocked at the firewall.
+  - time: 2026-03-02T11:20:00Z
+    kind: RESOLUTION
+    description: No further attempts for one hour. Incident resolved.
+
+went_well:
+  - The alert fired within minutes and was visible on the live feed.
+  - The audit log made it easy to confirm that no account was accessed.
+lessons:
+  - A high global rate limit does not protect individual login attempts.
+  - We had no runbook for blocking an IP quickly.
+action_items:
+  - description: Lower the login rate limit and add a per-account lockout delay.
+    owner: Caleb
+    due: 2026-03-16
+  - description: Write a runbook for blocking an IP at the firewall.
+    owner: Caleb
+    due: 2026-03-23

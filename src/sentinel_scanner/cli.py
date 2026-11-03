@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
@@ -23,6 +24,9 @@ from sentinel_scanner.logs.events import default_source, detections_to_events
 from sentinel_scanner.logs.parsers import LogType, ParseStats, read_records
 from sentinel_scanner.models import ScanResult, Severity, iso
 from sentinel_scanner.output import render_json, render_table
+from sentinel_scanner.report.models import Postmortem, ReportError, from_incident, load_yaml
+from sentinel_scanner.report.pdf import render_pdf
+from sentinel_scanner.report.render import render_markdown
 from sentinel_scanner.scan import run_scan
 
 app = typer.Typer(
@@ -376,3 +380,76 @@ def logs(
     if detections:
         raise typer.Exit(code=EXIT_FINDINGS)
     raise typer.Exit(code=send_failed)
+
+
+def _fetch_incident(incident_id: str, settings: Settings) -> Postmortem:
+    try:
+        uuid.UUID(incident_id)  # also guarantees the id is safe to place in a URL path
+    except ValueError as exc:
+        err_console.print("[red]--incident-id must be a UUID.[/red]")
+        raise typer.Exit(code=EXIT_REFUSED) from exc
+    api = _api_client_or_exit(settings)
+    try:
+        return from_incident(api.get_incident(incident_id))
+    except ApiError as exc:
+        err_console.print(f"[red]Could not fetch the incident: {exc}[/red]")
+        raise typer.Exit(code=EXIT_UNREACHABLE) from exc
+    except ReportError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=EXIT_REFUSED) from exc
+    finally:
+        api.close()
+
+
+@app.command()
+def postmortem(
+    out: Annotated[Path, typer.Option("--out", help="Markdown file to write, e.g. report.md")],
+    timeline: Annotated[
+        Path | None,
+        typer.Option(exists=True, dir_okay=False, readable=True, help="YAML timeline file."),
+    ] = None,
+    incident_id: Annotated[
+        str | None,
+        typer.Option(
+            help="Fetch this incident from sentinel-api (needs SENTINEL_API_KEY with incidents:read)."
+        ),
+    ] = None,
+    pdf: Annotated[
+        bool, typer.Option("--pdf", help="Also write a PDF next to the Markdown file.")
+    ] = False,
+    force: Annotated[
+        bool, typer.Option("--force", help="Overwrite existing output files.")
+    ] = False,
+) -> None:
+    """Generate an incident post-mortem report (Markdown, optionally PDF).
+
+    Give exactly one source: --timeline FILE (see examples/incident.yaml) or --incident-id UUID.
+    Fields the source does not contain are left as clearly marked TODOs for the team to complete.
+    """
+    if (timeline is None) == (incident_id is None):
+        err_console.print("[red]Give exactly one of --timeline or --incident-id.[/red]")
+        raise typer.Exit(code=EXIT_REFUSED)
+
+    pdf_path = out.with_suffix(".pdf")
+    targets = [out, *([pdf_path] if pdf else [])]
+    existing = [str(path) for path in targets if path.exists()]
+    if existing and not force:
+        err_console.print(
+            f"[red]Refusing to overwrite {', '.join(existing)}.[/red] Use --force to replace."
+        )
+        raise typer.Exit(code=EXIT_REFUSED)
+
+    try:
+        report = (
+            load_yaml(timeline) if timeline else _fetch_incident(str(incident_id), load_settings())
+        )
+    except ReportError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=EXIT_REFUSED) from exc
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(render_markdown(report), encoding="utf-8")
+    console.print(f"Wrote [bold]{out}[/bold]")
+    if pdf:
+        pdf_path.write_bytes(render_pdf(report))
+        console.print(f"Wrote [bold]{pdf_path}[/bold]")

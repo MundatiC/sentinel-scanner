@@ -3,7 +3,7 @@
 Defensive security scanner and log analyzer for the **Sentinel** platform
 ([sentinel-api](https://github.com/MundatiC/sentinel-api) · [sentinel-dashboard](https://github.com/MundatiC/sentinel-dashboard)).
 
-> Status: **step 4 of 5** (web checks, dependency scanning, log analysis, API ingestion). The post-mortem generator arrives in the last step. Plan: [docs/PLAN.md](docs/PLAN.md).
+> Plan: [docs/PLAN.md](docs/PLAN.md) · Security & responsible use: [SECURITY.md](SECURITY.md)
 
 ## Responsible use
 
@@ -100,20 +100,54 @@ export SENTINEL_API_KEY=snt_...        # create it in sentinel-api: POST /api-ke
   so the API key is never sent in clear text across the internet.
 - Exit code `4` means the upload failed (the results were still printed).
 
+## `sentinel-scan postmortem`
+
+```bash
+sentinel-scan postmortem --timeline examples/incident.yaml --out report.md --pdf
+sentinel-scan postmortem --incident-id <uuid> --out report.md      # pulls the incident from sentinel-api
+```
+
+Produces a fixed structure: **Summary, Impact, Timeline, Detection, Root cause, Response, What went well, Lessons learned,
+Action items**, plus time-to-detect and time-to-resolve when the dates are known. Whatever the source does not contain is left as a
+clearly marked *"To be completed by the incident team"*, so an incident exported from the API (which has a timeline and
+alerts but no root cause) becomes a ready-to-fill draft. See [examples/postmortem-example.md](examples/postmortem-example.md).
+
+- `--incident-id` needs `SENTINEL_API_KEY` with the `incidents:read` scope (it unlocks only that one export endpoint).
+- Text that may come from attackers (alert titles, usernames) is HTML-escaped in the Markdown, so a `<script>` in a log
+  line stays inert text in any viewer. YAML is read with `safe_load`. Existing files are never overwritten without `--force`.
+- PDF is pure Python (fpdf2, no system libraries) and Latin-1 only.
+
 ## Architecture
 
 ```mermaid
 flowchart LR
-  CLI[cli.py<br/>Typer] --> G{--i-own-this?}
+  CLI[cli.py<br/>Typer] --> W[web]
+  CLI --> D[deps]
+  CLI --> L[logs]
+  CLI --> P[postmortem]
+  W --> G{--i-own-this?}
   G -- no --> X[exit 2: refuse]
-  G -- yes --> C[checks]
+  G -- yes --> C[checks: headers, cookies, tls, files]
   C --> H[PoliteClient<br/>GET/HEAD only, delay, timeout]
   H --> T[(your site)]
-  C --> F[Findings]
+  D --> OSV[(api.osv.dev<br/>names + versions only)]
+  L --> LF[local log file]
+  C & D & L --> F[Findings / detections]
   F --> O[rich table / JSON]
   F -. "--send" .-> API[sentinel-api]
+  API -. "incident export" .-> P
+  P --> R[Markdown / PDF]
 ```
+
+## Development
+
+```bash
+ruff check . && ruff format --check . && mypy src tests && pytest
+```
+
+Tests never touch the real network: HTTP is faked with `httpx.MockTransport`, TLS tests use real local servers with throwaway
+certificates (`trustme`), and API tests use a fake Sentinel API.
 
 ## Screenshots
 
-_Added with the final step._
+_Added once the dashboard is built: a scan result table, a log analysis, a generated post-mortem._
