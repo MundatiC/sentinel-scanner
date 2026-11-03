@@ -28,6 +28,7 @@ dev = [
   "ruff>=0.5",
   "mypy>=1.10",
   "types-PyYAML",
+  "trustme>=1.1",
 ]
 
 [project.scripts]
@@ -45,6 +46,8 @@ src = ["src", "tests"]
 # E/F: pycodestyle + pyflakes, I: import order, B: likely bugs, UP: modern syntax,
 # S: security (bandit) rules, SIM: simplifications
 select = ["E", "F", "I", "B", "UP", "S", "SIM"]
+# Finding titles/descriptions are long human-readable sentences; the formatter still wraps code.
+ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]  # asserts are how pytest tests work

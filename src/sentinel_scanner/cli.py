@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Annotated
 
 import typer
 from rich.console import Console
 
 from sentinel_scanner import __version__
+from sentinel_scanner.checks import REGISTRY
 from sentinel_scanner.config import load_settings
-from sentinel_scanner.http import TargetError, validate_target
+from sentinel_scanner.http import PoliteClient, TargetError, validate_target
+from sentinel_scanner.models import Severity
+from sentinel_scanner.output import render_json, render_table
+from sentinel_scanner.scan import run_scan
 
 app = typer.Typer(
     help="Defensive security scanner and log analyzer for the Sentinel platform.",
@@ -48,6 +53,26 @@ def main(
     """Sentinel Scanner."""
 
 
+class OutputFormat(StrEnum):
+    table = "table"
+    json = "json"
+
+
+EXIT_FINDINGS = 1  # findings at or above --fail-on were reported (useful in CI)
+EXIT_UNREACHABLE = 3  # no check could run, e.g. the site is down
+
+
+def _parse_checks(raw: str) -> list[str]:
+    names = [part.strip().lower() for part in raw.split(",") if part.strip()]
+    unknown = [name for name in names if name not in REGISTRY]
+    if unknown or not names:
+        err_console.print(
+            f"[red]Unknown check(s):[/red] {', '.join(unknown) or raw!r}. Available: {', '.join(REGISTRY)}"
+        )
+        raise typer.Exit(code=EXIT_REFUSED)
+    return list(dict.fromkeys(names))  # remove duplicates, keep order
+
+
 @app.command()
 def web(
     target: Annotated[
@@ -60,15 +85,28 @@ def web(
             help="REQUIRED. Confirms you own the target or have permission to test it.",
         ),
     ] = False,
+    checks: Annotated[
+        str, typer.Option(help=f"Comma-separated checks to run. Available: {', '.join(REGISTRY)}")
+    ] = ",".join(REGISTRY),
+    output_format: Annotated[
+        OutputFormat, typer.Option("--format", help="Output format.")
+    ] = OutputFormat.table,
+    fail_on: Annotated[
+        Severity, typer.Option(help="Exit with code 1 if any finding is at least this severe.")
+    ] = Severity.HIGH,
     insecure_tls: Annotated[
         bool,
         typer.Option(
             "--insecure-tls",
-            help="Do not verify the target's TLS certificate (self-signed test servers).",
+            help="Do not verify the certificate for the header/cookie/file checks (self-signed test "
+            "servers). The TLS check still reports the invalid certificate.",
         ),
     ] = False,
 ) -> None:
-    """Scan a website you own for common security misconfigurations (read-only)."""
+    """Scan a website you own for common security misconfigurations (read-only).
+
+    Exit codes: 0 ok, 1 findings at/above --fail-on, 2 refused or bad usage, 3 target unreachable.
+    """
     # The guard runs FIRST, before anything else, including before the target is even parsed.
     if not i_own_this:
         err_console.print(OWNERSHIP_REFUSAL)
@@ -79,11 +117,20 @@ def web(
     except TargetError as exc:
         err_console.print(f"[red]Invalid target:[/red] {exc}")
         raise typer.Exit(code=EXIT_REFUSED) from exc
+    check_names = _parse_checks(checks)
 
     settings = load_settings()
-    console.print(f"Target confirmed as yours: [bold]{base_url}[/bold]")
-    console.print(
-        f"(request delay {settings.request_delay}s, timeout {settings.timeout}s, "
-        f"TLS verify: {not insecure_tls})"
-    )
-    console.print("[yellow]No checks are installed yet.[/yellow]")
+    with PoliteClient(
+        delay=settings.request_delay, timeout=settings.timeout, verify_tls=not insecure_tls
+    ) as client:
+        outcome = run_scan(base_url, check_names, client)
+
+    if output_format is OutputFormat.json:
+        typer.echo(render_json(outcome.result, outcome.errors))
+    else:
+        render_table(outcome.result, console, outcome.errors)
+
+    if outcome.nothing_ran:
+        raise typer.Exit(code=EXIT_UNREACHABLE)
+    if any(f.severity.rank >= fail_on.rank for f in outcome.result.findings):
+        raise typer.Exit(code=EXIT_FINDINGS)
