@@ -191,7 +191,8 @@ class TlsCheck:
             parts.scheme == "http" and parts.port not in (None, 80)
         ):
             return []
-        http_url = f"http://{ctx.hostname}/"
+        # Same page the user asked about: on a project site (user.github.io/repo/) the root is a 404.
+        http_url = f"http://{ctx.hostname}{ctx.start_path}"
         try:
             response = ctx.client.fetch(http_url, max_bytes=1)
         except (httpx.HTTPError, OSError):
