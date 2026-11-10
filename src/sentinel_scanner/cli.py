@@ -18,7 +18,7 @@ from sentinel_scanner.config import Settings, load_settings
 from sentinel_scanner.deps.osv import OsvClient, OsvError
 from sentinel_scanner.deps.parsers import DepsError
 from sentinel_scanner.deps.scan import scan_dependencies
-from sentinel_scanner.http import PoliteClient, TargetError, validate_target
+from sentinel_scanner.http import PoliteClient, TargetError, target_path, validate_target
 from sentinel_scanner.logs.detectors import (
     BruteForceDetector,
     Detection,
@@ -180,12 +180,12 @@ def web(
     with PoliteClient(
         delay=settings.request_delay, timeout=settings.timeout, verify_tls=not insecure_tls
     ) as client:
-        outcome = run_scan(base_url, check_names, client)
+        outcome = run_scan(base_url, check_names, client, start_path=target_path(target))
 
     if output_format is OutputFormat.json:
-        typer.echo(render_json(outcome.result, outcome.errors))
+        typer.echo(render_json(outcome.result, outcome.errors, outcome.notes))
     else:
-        render_table(outcome.result, console, outcome.errors)
+        render_table(outcome.result, console, outcome.errors, outcome.notes)
 
     if outcome.nothing_ran:
         raise typer.Exit(code=EXIT_UNREACHABLE)
