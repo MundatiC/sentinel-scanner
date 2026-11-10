@@ -43,6 +43,12 @@ def validate_target(raw: str) -> str:
     return f"{parts.scheme}://{host}{port}"
 
 
+def target_path(raw: str) -> str:
+    """The path the user asked for ("/" if none). Project sites (e.g. GitHub Pages) live under one."""
+    path = urlsplit(raw.strip()).path or "/"
+    return path if path.startswith("/") else "/" + path
+
+
 @dataclass(frozen=True)
 class Fetched:
     """What we kept from one response. The body is only ever a short prefix."""

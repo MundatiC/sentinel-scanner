@@ -29,6 +29,9 @@ class HomePage:
 class ScanContext:
     base_url: str
     client: PoliteClient
+    # Where the home page lives. Only the home-page checks use it; the sensitive-file probes
+    # always go to the site root, because that is where such files would be.
+    start_path: str = "/"
     # Tests inject a context that trusts a throwaway CA; in real use the system trust store is used.
     ssl_context: ssl.SSLContext | None = None
     _home: HomePage | None = field(default=None, repr=False)
@@ -47,9 +50,9 @@ class ScanContext:
         return parts.port or (443 if parts.scheme == "https" else 80)
 
     def home(self) -> HomePage:
-        """Fetch "/" once and share it between checks, so we send as few requests as possible."""
+        """Fetch the start page once and share it between checks, so we send as few requests as possible."""
         if self._home is None:
-            first = self.client.fetch(self.base_url + "/")
+            first = self.client.fetch(self.base_url + self.start_path)
             final = first
             for _ in range(MAX_REDIRECTS):
                 location = final.headers.get("location")
