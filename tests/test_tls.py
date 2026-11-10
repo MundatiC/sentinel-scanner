@@ -176,6 +176,16 @@ class TestHttpsRedirect:
         ctx = make_ctx(lambda r: httpx.Response(200), "http://example.com")
         assert TlsCheck().check_https_redirect(ctx)[0].severity is Severity.HIGH
 
+    def test_redirect_is_checked_on_the_start_path_not_the_site_root(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/app/":
+                return httpx.Response(301, headers={"location": "https://example.com/app/"})
+            return httpx.Response(404)  # the root of a project site is a 404 with no redirect
+
+        ctx = make_ctx(handler)
+        ctx.start_path = "/app/"
+        assert TlsCheck().check_https_redirect(ctx) == []
+
     def test_port_80_closed_is_fine(self) -> None:
         def refuse(request: httpx.Request) -> httpx.Response:
             raise httpx.ConnectError("refused")
