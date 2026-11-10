@@ -6,7 +6,7 @@ from typer.testing import CliRunner
 
 from conftest import SECURE_HEADERS
 from sentinel_scanner.cli import EXIT_FINDINGS, EXIT_REFUSED, EXIT_UNREACHABLE, app
-from sentinel_scanner.http import PoliteClient
+from sentinel_scanner.http import PoliteClient, target_path
 from sentinel_scanner.scan import run_scan
 
 runner = CliRunner()
@@ -60,6 +60,44 @@ class TestRunScan:
         outcome = run_scan("https://example.com", ["headers", "cookies"], client)
         assert outcome.nothing_ran
         assert set(outcome.errors) == {"headers", "cookies"}
+
+
+class TestTargetPathAndNotes:
+    def test_target_path_defaults_to_root_and_ignores_query(self) -> None:
+        assert target_path("https://example.com") == "/"
+        assert target_path("https://example.com/Mundati/?x=1#top") == "/Mundati/"
+
+    def test_start_path_is_the_page_checked_and_shown_in_the_target(self) -> None:
+        seen: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request.url.path)
+            return httpx.Response(200, headers=SECURE_HEADERS)
+
+        client = PoliteClient(delay=0, transport=httpx.MockTransport(handler))
+        outcome = run_scan("https://example.com", ["headers"], client, start_path="/Mundati/")
+        assert seen == ["/Mundati/"]
+        assert outcome.result.target == "https://example.com/Mundati/"
+        assert outcome.notes == []
+
+    def test_error_page_gets_a_wrong_url_note(self) -> None:
+        client = PoliteClient(delay=0, transport=httpx.MockTransport(lambda r: httpx.Response(404)))
+        outcome = run_scan("https://example.com", ["headers"], client)
+        assert len(outcome.notes) == 1 and "HTTP 404" in outcome.notes[0]
+
+    def test_cloudflare_block_is_reported_as_inconclusive(self) -> None:
+        blocked = httpx.Response(403, headers={"server": "cloudflare", "cf-ray": "abc"})
+        client = PoliteClient(delay=0, transport=httpx.MockTransport(lambda r: blocked))
+        outcome = run_scan("https://example.com", ["headers"], client)
+        assert len(outcome.notes) == 1 and "INCONCLUSIVE" in outcome.notes[0]
+
+    def test_cli_prints_the_note(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        patched_client(httpx.MockTransport(lambda r: httpx.Response(404)), monkeypatch)
+        result = runner.invoke(
+            app, ["web", "https://example.com/nope/", "--i-own-this", "--checks", "headers"]
+        )
+        assert "https://example.com/nope/" in result.output
+        assert "returned HTTP 404" in result.output
 
 
 class TestWebCommand:
