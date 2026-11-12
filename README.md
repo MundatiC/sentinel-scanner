@@ -150,4 +150,14 @@ certificates (`trustme`), and API tests use a fake Sentinel API.
 
 ## Screenshots
 
-_Added once the dashboard is built: a scan result table, a log analysis, a generated post-mortem._
+Detecting a brute-force attack in an auth log and sending it to the API (`--send`):
+
+![sentinel-scan logs on an auth log](docs/images/logs-auth.svg)
+
+Brute force and injection attempts in an nginx access log:
+
+![sentinel-scan logs on an nginx access log](docs/images/logs-nginx.svg)
+
+Generating an incident post-mortem:
+
+![sentinel-scan postmortem](docs/images/postmortem.svg)
